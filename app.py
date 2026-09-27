@@ -1,12 +1,13 @@
+import base64
 import os
-import streamlit as st
+import shutil
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import pulp
-import matplotlib.pyplot as plt
-import base64
-import shutil
+import streamlit as st
 
-# تنظیمات صفحه استریم‌لیت
+# --- Streamlit Page Configuration ---
 st.set_page_config(
     page_title="Day-Ahead Market Clearing & Alpine Hydro Simulator",
     page_icon="⚡",
@@ -31,11 +32,9 @@ num_demands = st.sidebar.slider(
 
 # --- Optimization Engine (Market Clearing) ---
 with st.spinner("Running Day-Ahead Market Clearing Optimization..."):
-  import numpy as np
-
   np.random.seed(42)
 
-  # تولید داده‌های عرضه
+  # Generate Supply Bids Data
   gen_capacities = np.random.uniform(50, 250, num_gens)
   gen_costs = np.sort(np.random.uniform(15, 110, num_gens))
   supply_bids = pd.DataFrame(
@@ -46,7 +45,7 @@ with st.spinner("Running Day-Ahead Market Clearing Optimization..."):
       }
   )
 
-  # تولید داده‌های تقاضا
+  # Generate Demand Bids Data
   dem_volumes = np.random.uniform(40, 200, num_demands)
   dem_values = np.sort(np.random.uniform(50, 130, num_demands))[::-1]
   demand_bids = pd.DataFrame(
@@ -57,14 +56,14 @@ with st.spinner("Running Day-Ahead Market Clearing Optimization..."):
       }
   )
 
-  # حل مدل با PuLP
+  # Formulate Optimization Problem using PuLP (with standard Python float conversions)
   market_model = pulp.LpProblem("Day_Ahead_Market_Clearing", pulp.LpMaximize)
 
   p_gen = {
       i: pulp.LpVariable(
           f"Gen_{i}",
           lowBound=0,
-          upBound=supply_bids.loc[i, "Capacity_MW"],
+          upBound=float(supply_bids.loc[i, "Capacity_MW"]),
           cat="Continuous",
       )
       for i in supply_bids.index
@@ -73,17 +72,18 @@ with st.spinner("Running Day-Ahead Market Clearing Optimization..."):
       j: pulp.LpVariable(
           f"Dem_{j}",
           lowBound=0,
-          upBound=demand_bids.loc[j, "Volume_MW"],
+          upBound=float(demand_bids.loc[j, "Volume_MW"]),
           cat="Continuous",
       )
       for j in demand_bids.index
   }
 
   social_welfare = pulp.lpSum(
-      p_dem[j] * demand_bids.loc[j, "Willingness_to_Pay"]
+      p_dem[j] * float(demand_bids.loc[j, "Willingness_to_Pay"])
       for j in demand_bids.index
   ) - pulp.lpSum(
-      p_gen[i] * supply_bids.loc[i, "Marginal_Cost"] for i in supply_bids.index
+      p_gen[i] * float(supply_bids.loc[i, "Marginal_Cost"])
+      for i in supply_bids.index
   )
 
   market_model += social_welfare
@@ -103,7 +103,7 @@ with st.spinner("Running Day-Ahead Market Clearing Optimization..."):
       pulp.value(p_dem[j]) for j in demand_bids.index
   ]
 
-  # ذخیره خروجی‌ها در پوشه outputs
+  # Save Outputs to 'outputs' Directory
   output_dir = "outputs"
   os.makedirs(output_dir, exist_ok=True)
   supply_bids.to_csv(
@@ -113,7 +113,7 @@ with st.spinner("Running Day-Ahead Market Clearing Optimization..."):
       os.path.join(output_dir, "market_clearing_demand.csv"), index=False
   )
 
-  # رسم نمودار تعادل
+  # Plot Market Equilibrium Curves
   fig, ax = plt.subplots(figsize=(10, 5))
   sorted_supply = supply_bids.sort_values("Marginal_Cost").reset_index(drop=True)
   sorted_supply["Cumulative_Capacity"] = sorted_supply["Capacity_MW"].cumsum()
@@ -183,10 +183,10 @@ if os.path.exists(chart_path):
 st.markdown("---")
 col_s, col_d = st.columns(2)
 with col_s:
-  st.subheader("📊 Supply Bids Cleared")
+  st.subheader("📊 Cleared Supply Bids")
   st.dataframe(supply_bids, use_container_width=True)
 with col_d:
-  st.subheader("📊 Demand Bids Cleared")
+  st.subheader("📊 Cleared Demand Bids")
   st.dataframe(demand_bids, use_container_width=True)
 
 # --- Sidebar Download Bundle ---
