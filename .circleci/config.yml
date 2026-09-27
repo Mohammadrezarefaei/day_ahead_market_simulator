@@ -7,12 +7,14 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Bootstrap pip and Install Dependencies
+          name: Install Pip via System Package Manager
           command: |
-            curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-            python3 get-pip.py
-            rm get-pip.py
-            python3 -m pip install -r requirements.txt
+            sudo apt-get update
+            sudo apt-get install -y python3-pip python3-dev
+      - run:
+          name: Install Project Dependencies
+          command: |
+            pip3 install -r requirements.txt
       - run:
           name: Run Unit Tests with Pytest
           command: |
