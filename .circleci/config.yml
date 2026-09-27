@@ -7,19 +7,18 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Install Pip via System Package Manager
+          name: Setup Virtual Environment and Install Dependencies
           command: |
-            sudo apt-get update
-            sudo apt-get install -y python3-pip python3-dev
-      - run:
-          name: Install Project Dependencies
-          command: |
-            pip3 install -r requirements.txt
+            python -m venv venv
+            . venv/bin/activate
+            pip install --upgrade pip
+            pip install -r requirements.txt
       - run:
           name: Run Unit Tests with Pytest
           command: |
+            . venv/bin/activate
             export PYTHONPATH=.
-            python3 -m pytest
+            pytest
 
 workflows:
   version: 2
