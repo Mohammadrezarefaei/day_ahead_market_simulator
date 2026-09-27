@@ -7,16 +7,13 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Setup Virtual Environment and Install Dependencies
+          name: Install Dependencies
           command: |
-            python -m venv venv
-            . venv/bin/activate
             pip install --upgrade pip
             pip install -r requirements.txt
       - run:
           name: Run Unit Tests with Pytest
           command: |
-            . venv/bin/activate
             export PYTHONPATH=.
             pytest
 
