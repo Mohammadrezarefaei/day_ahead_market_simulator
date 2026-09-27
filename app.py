@@ -59,44 +59,45 @@ with st.spinner("Running Day-Ahead Market Clearing Optimization..."):
     # Formulate Optimization Problem using PuLP
     market_model = pulp.LpProblem("Day_Ahead_Market_Clearing", pulp.LpMaximize)
 
-    # FOOLPROOF METHOD: Create dictionaries of variables using PuLP's built-in method
-    p_gen = pulp.LpVariable.dicts("Gen", supply_bids.index, lowBound=0, cat=pulp.LpContinuous)
-    p_dem = pulp.LpVariable.dicts("Dem", demand_bids.index, lowBound=0, cat=pulp.LpContinuous)
+    # 1. Convert Pandas indices to raw Python lists to avoid internal conflicts
+    gen_idx = supply_bids.index.tolist()
+    dem_idx = demand_bids.index.tolist()
 
-    # Set upper bounds explicitly AFTER creation to bypass constructor TypeErrors
-    for i in supply_bids.index:
+    # 2. Use string "Continuous" to prevent AttributeError from pulp.LpContinuous
+    p_gen = pulp.LpVariable.dicts("Gen", gen_idx, lowBound=0, cat="Continuous")
+    p_dem = pulp.LpVariable.dicts("Dem", dem_idx, lowBound=0, cat="Continuous")
+
+    # 3. Explicitly assign upper bounds securely
+    for i in gen_idx:
         p_gen[i].upBound = float(supply_bids.loc[i, "Capacity_MW"])
 
-    for j in demand_bids.index:
+    for j in dem_idx:
         p_dem[j].upBound = float(demand_bids.loc[j, "Volume_MW"])
 
     # Objective Function
     social_welfare = pulp.lpSum(
         p_dem[j] * float(demand_bids.loc[j, "Willingness_to_Pay"])
-        for j in demand_bids.index
+        for j in dem_idx
     ) - pulp.lpSum(
         p_gen[i] * float(supply_bids.loc[i, "Marginal_Cost"])
-        for i in supply_bids.index
+        for i in gen_idx
     )
 
     market_model += social_welfare
 
     # Market Balance Constraint
     market_model += (
-        pulp.lpSum(p_gen[i] for i in supply_bids.index)
-        == pulp.lpSum(p_dem[j] for j in demand_bids.index),
+        pulp.lpSum(p_gen[i] for i in gen_idx)
+        == pulp.lpSum(p_dem[j] for j in dem_idx),
         "Market_Balance",
     )
 
     market_model.solve(pulp.PULP_CBC_CMD(msg=0))
 
     mcp = market_model.constraints["Market_Balance"].pi
-    supply_bids["Cleared_Volume_MW"] = [
-        pulp.value(p_gen[i]) for i in supply_bids.index
-    ]
-    demand_bids["Cleared_Volume_MW"] = [
-        pulp.value(p_dem[j]) for j in demand_bids.index
-    ]
+    
+    supply_bids["Cleared_Volume_MW"] = [pulp.value(p_gen[i]) for i in gen_idx]
+    demand_bids["Cleared_Volume_MW"] = [pulp.value(p_dem[j]) for j in dem_idx]
 
     # Save Outputs to 'outputs' Directory
     output_dir = "outputs"
