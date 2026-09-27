@@ -56,27 +56,24 @@ with st.spinner("Running Day-Ahead Market Clearing Optimization..."):
         }
     )
 
-    # Formulate Optimization Problem using PuLP (with standard Python float conversions)
+    # Formulate Optimization Problem using PuLP (Using safe explicit for-loops)
     market_model = pulp.LpProblem("Day_Ahead_Market_Clearing", pulp.LpMaximize)
 
-    p_gen = {
-        i: pulp.LpVariable(
-            f"Gen_{i}",
-            lowBound=0,
-            upBound=float(supply_bids.loc[i, "Capacity_MW"]),
-            cat="Continuous",
+    p_gen = {}
+    for i in supply_bids.index:
+        gen_name = str(supply_bids.loc[i, "Gen_ID"])
+        cap = float(supply_bids.loc[i, "Capacity_MW"])
+        p_gen[i] = pulp.LpVariable(
+            f"Gen_{gen_name}", lowBound=0.0, upBound=cap, cat="Continuous"
         )
-        for i in supply_bids.index
-    }
-    p_dem = {
-        j: pulp.LpVariable(
-            f"Dem_{j}",
-            lowBound=0,
-            upBound=float(demand_bids.loc[j, "Volume_MW"]),
-            cat="Continuous",
+
+    p_dem = {}
+    for j in demand_bids.index:
+        dem_name = str(demand_bids.loc[j, "Demand_ID"])
+        vol = float(demand_bids.loc[j, "Volume_MW"])
+        p_dem[j] = pulp.LpVariable(
+            f"Dem_{dem_name}", lowBound=0.0, upBound=vol, cat="Continuous"
         )
-        for j in demand_bids.index
-    }
 
     social_welfare = pulp.lpSum(
         p_dem[j] * float(demand_bids.loc[j, "Willingness_to_Pay"])
