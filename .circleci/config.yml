@@ -7,18 +7,13 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Install Dependencies
+          name: Setup Pip and Install Dependencies
           command: |
-            python -m pip install --upgrade pip
-            pip install -r requirements.txt
+            python3 -m ensurepip --upgrade
+            python3 -m pip install --upgrade pip
+            python3 -m pip install -r requirements.txt
       - run:
           name: Run Unit Tests with Pytest
           command: |
             export PYTHONPATH=.
-            pytest
-
-workflows:
-  version: 2
-  test-workflow:
-    jobs:
-      - build-and-test
+            python3 -m pytest
