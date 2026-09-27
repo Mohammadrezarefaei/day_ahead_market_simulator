@@ -4,7 +4,7 @@ import shutil
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pulp
+from scipy.optimize import linprog
 import streamlit as st
 
 # --- Streamlit Page Configuration ---
@@ -30,8 +30,8 @@ num_demands = st.sidebar.slider(
     "Number of Demand Blocks", min_value=5, max_value=15, value=10, step=1
 )
 
-# --- Optimization Engine (Market Clearing) ---
-with st.spinner("Running Day-Ahead Market Clearing Optimization..."):
+# --- Optimization Engine (SciPy Market Clearing) ---
+with st.spinner("Running Day-Ahead Market Clearing Engine (SciPy)..."):
     np.random.seed(42)
 
     # Generate Supply Bids Data
@@ -56,46 +56,43 @@ with st.spinner("Running Day-Ahead Market Clearing Optimization..."):
         }
     )
 
-    # Formulate Optimization Problem using PuLP
-    market_model = pulp.LpProblem("Day_Ahead_Market_Clearing", pulp.LpMaximize)
-
     # =========================================================================
-    # BULLETPROOF VARIABLE CREATION (Bypassing LpVariable.dicts & Constructors)
+    # BULLETPROOF SCIPY OPTIMIZATION (No PuLP, No Rust-Core Crashes)
     # =========================================================================
-    p_gen = []
-    for i in range(num_gens):
-        # Create the simplest variable possible
-        var = pulp.LpVariable(f"Gen_{i}")
-        p_gen.append(var)
-        # Apply bounds as direct mathematical constraints 
-        market_model += var >= 0, f"Gen_{i}_lowbound"
-        market_model += var <= float(supply_bids.loc[i, "Capacity_MW"]), f"Gen_{i}_upbound"
+    # Objective: Minimize (Gen_Cost * Gen_Vol) - (Dem_WTP * Dem_Vol)
+    c_gen = supply_bids["Marginal_Cost"].values
+    c_dem = -demand_bids["Willingness_to_Pay"].values
+    c = np.concatenate([c_gen, c_dem])
 
-    p_dem = []
-    for j in range(num_demands):
-        var = pulp.LpVariable(f"Dem_{j}")
-        p_dem.append(var)
-        market_model += var >= 0, f"Dem_{j}_lowbound"
-        market_model += var <= float(demand_bids.loc[j, "Volume_MW"]), f"Dem_{j}_upbound"
+    # Equality constraint: sum(Gen_Vol) - sum(Dem_Vol) == 0
+    A_eq = np.concatenate([np.ones(num_gens), -np.ones(num_demands)]).reshape(1, -1)
+    b_eq = np.array([0.0])
 
-    # Objective Function
-    social_welfare = pulp.lpSum(
-        p_dem[j] * float(demand_bids.loc[j, "Willingness_to_Pay"]) for j in range(num_demands)
-    ) - pulp.lpSum(
-        p_gen[i] * float(supply_bids.loc[i, "Marginal_Cost"]) for i in range(num_gens)
-    )
+    # Variable Bounds: (0, Max_Capacity)
+    bounds_gen = [(0, cap) for cap in supply_bids["Capacity_MW"].values]
+    bounds_dem = [(0, vol) for vol in demand_bids["Volume_MW"].values]
+    bounds = bounds_gen + bounds_dem
 
-    market_model += social_welfare
+    # Solve using SciPy's highly optimized HiGHS solver
+    res = linprog(c, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method='highs')
 
-    # Market Balance Constraint
-    market_model += pulp.lpSum(p_gen) == pulp.lpSum(p_dem), "Market_Balance"
-
-    market_model.solve(pulp.PULP_CBC_CMD(msg=0))
-
-    mcp = market_model.constraints["Market_Balance"].pi
-    
-    supply_bids["Cleared_Volume_MW"] = [pulp.value(p_gen[i]) for i in range(num_gens)]
-    demand_bids["Cleared_Volume_MW"] = [pulp.value(p_dem[j]) for j in range(num_demands)]
+    if res.success:
+        # Extract cleared volumes
+        supply_bids["Cleared_Volume_MW"] = res.x[:num_gens]
+        demand_bids["Cleared_Volume_MW"] = res.x[num_gens:]
+        
+        # Calculate Social Welfare (Negative of the minimized objective)
+        social_welfare = -res.fun
+        
+        # Calculate Market Clearing Price (MCP) via Shadow Price or Fallback
+        try:
+            mcp = abs(res.eqlin.marginals[0])
+        except (AttributeError, TypeError, IndexError):
+            active_gen = supply_bids[supply_bids["Cleared_Volume_MW"] > 0.1]
+            mcp = active_gen["Marginal_Cost"].max() if not active_gen.empty else 0.0
+    else:
+        st.error("Market Clearing Failed to Converge!")
+        st.stop()
 
     # Save Outputs to 'outputs' Directory
     output_dir = "outputs"
@@ -165,9 +162,7 @@ with st.spinner("Running Day-Ahead Market Clearing Optimization..."):
 col1, col2, col3 = st.columns(3)
 col1.metric("Market Clearing Price (MCP)", f"{mcp:.2f} €/MWh")
 col2.metric("Total Cleared Volume", f"{total_cleared_vol:.1f} MW")
-col3.metric(
-    "Social Welfare", f"€{pulp.value(market_model.objective):,.2f}"
-)
+col3.metric("Social Welfare", f"€{social_welfare:,.2f}")
 
 st.markdown("---")
 st.subheader("📈 Market Equilibrium & Clearing Dynamics")
