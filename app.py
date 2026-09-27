@@ -56,25 +56,21 @@ with st.spinner("Running Day-Ahead Market Clearing Optimization..."):
         }
     )
 
-    # Formulate Optimization Problem using PuLP (Using safe explicit for-loops)
+    # Formulate Optimization Problem using PuLP
     market_model = pulp.LpProblem("Day_Ahead_Market_Clearing", pulp.LpMaximize)
 
-    p_gen = {}
+    # FOOLPROOF METHOD: Create dictionaries of variables using PuLP's built-in method
+    p_gen = pulp.LpVariable.dicts("Gen", supply_bids.index, lowBound=0, cat=pulp.LpContinuous)
+    p_dem = pulp.LpVariable.dicts("Dem", demand_bids.index, lowBound=0, cat=pulp.LpContinuous)
+
+    # Set upper bounds explicitly AFTER creation to bypass constructor TypeErrors
     for i in supply_bids.index:
-        gen_name = str(supply_bids.loc[i, "Gen_ID"])
-        cap = float(supply_bids.loc[i, "Capacity_MW"])
-        p_gen[i] = pulp.LpVariable(
-            f"Gen_{gen_name}", lowBound=0.0, upBound=cap, cat="Continuous"
-        )
+        p_gen[i].upBound = float(supply_bids.loc[i, "Capacity_MW"])
 
-    p_dem = {}
     for j in demand_bids.index:
-        dem_name = str(demand_bids.loc[j, "Demand_ID"])
-        vol = float(demand_bids.loc[j, "Volume_MW"])
-        p_dem[j] = pulp.LpVariable(
-            f"Dem_{dem_name}", lowBound=0.0, upBound=vol, cat="Continuous"
-        )
+        p_dem[j].upBound = float(demand_bids.loc[j, "Volume_MW"])
 
+    # Objective Function
     social_welfare = pulp.lpSum(
         p_dem[j] * float(demand_bids.loc[j, "Willingness_to_Pay"])
         for j in demand_bids.index
@@ -84,6 +80,8 @@ with st.spinner("Running Day-Ahead Market Clearing Optimization..."):
     )
 
     market_model += social_welfare
+
+    # Market Balance Constraint
     market_model += (
         pulp.lpSum(p_gen[i] for i in supply_bids.index)
         == pulp.lpSum(p_dem[j] for j in demand_bids.index),
